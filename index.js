@@ -1,7 +1,7 @@
-import { Client, Events, GatewayIntentBits, MessageFlags, Routes, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
 import { parseWowLinks, resolveWowLink } from './wowhead.js';
 
-const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_RELAY_ID } = process.env;
+const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID } = process.env;
 if (!SOLSTICE_BOT_TOKEN || !SOLSTICE_CHAT_CHANNEL_ID) {
   console.log('Waiting for Discord bot token and channel ID. Add the settings and redeploy to connect.');
   await new Promise(resolve => {
@@ -13,9 +13,12 @@ if (!SOLSTICE_BOT_TOKEN || !SOLSTICE_CHAT_CHANNEL_ID) {
   });
   process.exit(0);
 }
+// Verified against Discord's World of Warcraft badge on the linked channel.
+const gameOriginFlag = 1 << 16;
+const wowApplicationId = '1384671873593512078';
 const snowflake = /^\d{17,20}$/;
-if (!snowflake.test(SOLSTICE_CHAT_CHANNEL_ID) || (SOLSTICE_RELAY_ID && !snowflake.test(SOLSTICE_RELAY_ID))) {
-  console.error('Set SOLSTICE_BOT_TOKEN and SOLSTICE_CHAT_CHANNEL_ID. If provided, SOLSTICE_RELAY_ID must be a Discord ID.');
+if (!snowflake.test(SOLSTICE_CHAT_CHANNEL_ID)) {
+  console.error('Set SOLSTICE_CHAT_CHANNEL_ID to a Discord channel ID.');
   process.exit(1);
 }
 
@@ -38,17 +41,7 @@ client.once(Events.ClientReady, async ready => {
     const history = Boolean(permissions?.has(PermissionFlagsBits.ReadMessageHistory));
     const send = Boolean(permissions?.has(channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages));
     console.log('Discord channel access:', JSON.stringify({ view, history, send }));
-    if (view && history) {
-      const messages = await ready.rest.get(Routes.channelMessages(channel.id), { query: new URLSearchParams({ limit: '20' }) });
-      for (const message of messages) {
-        const badgeExample = message.content === "I still don't see it in the channel";
-        const metadata = Object.fromEntries(Object.entries(message).filter(([key, value]) =>
-          /lobby|game|application_id|source|additional_name|flags|^type$/.test(key) &&
-          (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string')
-        ));
-        console.log('Discord message origin:', JSON.stringify({ badgeExample, metadata, keys: Object.keys(message).sort() }));
-      }
-    }
+    console.log('Wowhead replies enabled for World of Warcraft messages only.');
   } catch (error) {
     console.error('Discord channel check failed:', error.code ?? error.name);
   }
@@ -56,10 +49,7 @@ client.once(Events.ClientReady, async ready => {
 client.on(Events.Error, error => console.error('Discord connection error:', error.code ?? error.name));
 client.on(Events.MessageCreate, message => {
   if (message.channelId !== SOLSTICE_CHAT_CHANNEL_ID || message.author.id === client.user?.id) return;
-  // Reply only after the native WoW origin marker has been verified.
-  if (!SOLSTICE_RELAY_ID) return;
-  const relayId = message.webhookId ?? message.author.id;
-  if (SOLSTICE_RELAY_ID && relayId !== SOLSTICE_RELAY_ID) return;
+  if (message.applicationId !== wowApplicationId || !message.flags.has(gameOriginFlag)) return;
   const links = parseWowLinks(message.content);
   if (!links.length || queue.length >= 30) return;
   queue.push({ message, links });
@@ -73,8 +63,7 @@ async function processQueue() {
     while (queue.length) {
       const { message, links } = queue.shift();
       try {
-        const resolved = (await Promise.all(links.map(resolveWowLink)))
-          .filter(link => SOLSTICE_RELAY_ID || !link.search);
+        const resolved = await Promise.all(links.map(resolveWowLink));
         if (!resolved.length) continue;
         const content = resolved.map(({ name, url, search }) =>
           '[' + escapeMarkdown(name) + (search ? ' (Wowhead search)' : '') + '](' + url + ')'
