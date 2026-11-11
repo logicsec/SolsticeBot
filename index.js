@@ -58,7 +58,7 @@ client.on(Events.MessageCreate, message => {
   if (message.applicationId !== wowApplicationId || !message.flags.has(gameOriginFlag)) return;
   const links = parseWowLinks(message.content);
   if (!links.length || queue.length >= 30) return;
-  queue.push({ message, links });
+  queue.push(links);
   void processQueue();
 });
 
@@ -103,7 +103,7 @@ async function processQueue() {
   processing = true;
   try {
     while (queue.length) {
-      const { message, links } = queue.shift();
+      const links = queue.shift();
       try {
         const resolved = await Promise.all(links.map(resolveWowLink));
         if (!resolved.length) continue;
@@ -116,7 +116,7 @@ async function processQueue() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            content: content + ' · [Original message](' + message.url + ')',
+            content,
             flags: MessageFlags.SuppressEmbeds,
             allowed_mentions: { parse: [] },
           }),
