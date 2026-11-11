@@ -25,12 +25,6 @@ const client = new Client({
 const queue = [];
 let processing = false;
 
-function relayCandidate(message) {
-  if (message.author.id === client.user?.id || !parseWowLinks(message.content).length) return;
-  const source = message.webhookId ? 'webhook' : message.author.bot ? 'bot' : 'member';
-  console.log('Relay candidate ID:', message.webhookId ?? message.author.id, '(' + source + ')');
-}
-
 client.once(Events.ClientReady, async ready => {
   console.log('Solstice bot connected as ' + ready.user.username);
   try {
@@ -44,10 +38,7 @@ client.once(Events.ClientReady, async ready => {
     const history = Boolean(permissions?.has(PermissionFlagsBits.ReadMessageHistory));
     const send = Boolean(permissions?.has(channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages));
     console.log('Discord channel access:', JSON.stringify({ view, history, send }));
-    if (!SOLSTICE_RELAY_ID && view && history) {
-      const recent = await channel.messages.fetch({ limit: 15 });
-      for (const message of recent.values()) relayCandidate(message);
-    }
+    console.log('Wowhead replies enabled for ' + (SOLSTICE_RELAY_ID ? 'the configured relay' : 'recognized links in the configured channel') + '.');
   } catch (error) {
     console.error('Discord channel check failed:', error.code ?? error.name);
   }
@@ -58,10 +49,6 @@ client.on(Events.MessageCreate, message => {
   const relayId = message.webhookId ?? message.author.id;
   if (SOLSTICE_RELAY_ID && relayId !== SOLSTICE_RELAY_ID) return;
   const links = parseWowLinks(message.content);
-  if (!SOLSTICE_RELAY_ID) {
-    relayCandidate(message);
-    return;
-  }
   if (!links.length || queue.length >= 30) return;
   queue.push({ message, links });
   void processQueue();
@@ -74,7 +61,9 @@ async function processQueue() {
     while (queue.length) {
       const { message, links } = queue.shift();
       try {
-        const resolved = await Promise.all(links.map(resolveWowLink));
+        const resolved = (await Promise.all(links.map(resolveWowLink)))
+          .filter(link => SOLSTICE_RELAY_ID || !link.search);
+        if (!resolved.length) continue;
         const content = resolved.map(({ name, url, search }) =>
           '[' + escapeMarkdown(name) + (search ? ' (Wowhead search)' : '') + '](' + url + ')'
         ).join(' · ');
@@ -84,6 +73,7 @@ async function processQueue() {
           allowedMentions: { parse: [], repliedUser: false },
           failIfNotExists: false,
         });
+        console.log('Posted Wowhead links:', resolved.length);
       } catch (error) {
         console.error('Could not post item links:', error.code ?? error.name);
       }
