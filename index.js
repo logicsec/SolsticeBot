@@ -1,7 +1,7 @@
 import { Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
 import { parseWowLinks, resolveWowLink } from './wowhead.js';
 
-const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID } = process.env;
+const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_DISCORD_WEBHOOK_URL } = process.env;
 if (!SOLSTICE_BOT_TOKEN || !SOLSTICE_CHAT_CHANNEL_ID) {
   console.log('Waiting for Discord bot token and channel ID. Add the settings and redeploy to connect.');
   await new Promise(resolve => {
@@ -27,6 +27,7 @@ const client = new Client({
 });
 const queue = [];
 let processing = false;
+let webhookVerification;
 
 client.once(Events.ClientReady, async ready => {
   console.log('Solstice bot connected as ' + ready.user.username);
@@ -41,20 +42,61 @@ client.once(Events.ClientReady, async ready => {
     const history = Boolean(permissions?.has(PermissionFlagsBits.ReadMessageHistory));
     const send = Boolean(permissions?.has(channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages));
     console.log('Discord channel access:', JSON.stringify({ view, history, send }));
-    console.log('Wowhead replies enabled for World of Warcraft messages only.');
+    if (!SOLSTICE_DISCORD_WEBHOOK_URL) {
+      console.log('Waiting for a Discord webhook URL to post Wowhead links.');
+      return;
+    }
+    await verifyWebhook();
+    console.log('Discord webhook verified for the WoW-linked channel.');
   } catch (error) {
     console.error('Discord channel check failed:', error.code ?? error.name);
   }
 });
 client.on(Events.Error, error => console.error('Discord connection error:', error.code ?? error.name));
 client.on(Events.MessageCreate, message => {
-  if (message.channelId !== SOLSTICE_CHAT_CHANNEL_ID || message.author.id === client.user?.id) return;
+  if (!SOLSTICE_DISCORD_WEBHOOK_URL || message.channelId !== SOLSTICE_CHAT_CHANNEL_ID || message.author.id === client.user?.id) return;
   if (message.applicationId !== wowApplicationId || !message.flags.has(gameOriginFlag)) return;
   const links = parseWowLinks(message.content);
   if (!links.length || queue.length >= 30) return;
   queue.push({ message, links });
   void processQueue();
 });
+
+function webhookUrl() {
+  let url;
+  try { url = new URL(SOLSTICE_DISCORD_WEBHOOK_URL); } catch {}
+  if (url?.origin !== 'https://discord.com' || url.username || url.password || url.search || url.hash ||
+      !/^\/api(?:\/v10)?\/webhooks\/\d{17,20}\/[\w.-]+$/.test(url.pathname)) {
+    throw new Error('InvalidDiscordWebhookUrl');
+  }
+  return url;
+}
+
+async function requestWebhook(url, options = {}) {
+  const response = await fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    const error = new Error('DiscordWebhookRequestFailed');
+    error.code = Number.isInteger(result.code) ? result.code : response.status;
+    throw error;
+  }
+  return response.json();
+}
+
+function verifyWebhook() {
+  webhookVerification ??= (async () => {
+    const url = webhookUrl();
+    const webhook = await requestWebhook(url);
+    if (webhook.type !== 1 || webhook.channel_id !== SOLSTICE_CHAT_CHANNEL_ID) {
+      throw new Error('WebhookIsNotInConfiguredChannel');
+    }
+    return url;
+  })().catch(error => {
+    webhookVerification = undefined;
+    throw error;
+  });
+  return webhookVerification;
+}
 
 async function processQueue() {
   if (processing) return;
@@ -68,17 +110,18 @@ async function processQueue() {
         const content = resolved.map(({ name, url, search }) =>
           '[' + escapeMarkdown(name) + (search ? ' (Wowhead search)' : '') + '](' + url + ')'
         ).join(' · ');
-        const options = {
-          content,
-          flags: MessageFlags.SuppressEmbeds,
-          allowedMentions: { parse: [], repliedUser: false },
-        };
-        try {
-          await message.reply({ ...options, failIfNotExists: false });
-        } catch (error) {
-          if (Number(error.code) !== 20062) throw error;
-          await message.channel.send({ ...options, content: content + ' · [Original message](' + message.url + ')' });
-        }
+        const url = new URL(await verifyWebhook());
+        url.searchParams.set('wait', 'true');
+        const posted = await requestWebhook(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: content + ' · [Original message](' + message.url + ')',
+            flags: MessageFlags.SuppressEmbeds,
+            allowed_mentions: { parse: [] },
+          }),
+        });
+        if (!posted.id || posted.channel_id !== SOLSTICE_CHAT_CHANNEL_ID) throw new Error('WebhookPostUnverified');
         console.log('Posted Wowhead links:', resolved.length);
       } catch (error) {
         console.error('Could not post item links:', error.code ?? error.name);

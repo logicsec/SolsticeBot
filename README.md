@@ -1,30 +1,20 @@
-# Solstice guild chat bot
+# SolsticeBot
 
-The bot listens in one Discord channel and replies to a configured WoW relay with Wowhead Forever links. It handles adjacent bracketed names, raw WoW hyperlink IDs, items, and spells. Exact matches become direct links. Names without a unique match become labeled Wowhead searches.
+SolsticeBot reads World of Warcraft messages in the Discord guild-chat-linked channel and posts Wowhead Forever links in the same Discord channel using an incoming webhook. Discord marks native WoW messages with a game-origin flag and application ID. Ordinary Discord messages are ignored.
 
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create a separate application named Solstice Guild Bot. Open **Bot**, enable **Message Content Intent**, and generate a bot token. Store it as a secret. Discord sign-in for the Solstice website uses a separate credential.
-2. Open **Installation**, enable **Guild Install**, and use the `bot` scope with **View Channel**, **Read Message History**, and **Send Messages**. Install the app in the Solstice server. Check that those permissions are allowed in the linked WoW chat channel.
-3. In Discord settings, turn on **Advanced → Developer Mode**. Right-click the linked guild-chat channel and copy its channel ID. Set `SOLSTICE_CHAT_CHANNEL_ID` to that ID and `SOLSTICE_BOT_TOKEN` to the bot token in your local environment or deployment secrets.
-4. Start the bot. If you don't know the relay's ID, leave `SOLSTICE_RELAY_ID` unset. This enables discovery mode. Link an item from WoW and look for **Relay candidate ID** in the bot logs. Set `SOLSTICE_RELAY_ID` to the printed ID and restart. The bot accepts only that sender or webhook in the configured channel.
-5. In WoW guild chat, link Reverence and Holy Conduit. Discord should get one reply with two links.
+## Discord and Komodo setup
 
-From the repository root:
+1. Install the bot in the Discord server and enable **Message Content Intent** in the Discord Developer Portal. Give it **View Channel** and **Read Message History** for the linked channel.
+2. In the same channel, open **Edit Channel → Integrations → Webhooks** and create an incoming webhook.
+3. Store the token and webhook URL as secret variables in Komodo. Set the stack environment as follows.
 
-```sh
-npm ci
-npm start
+```dotenv
+SOLSTICE_BOT_TOKEN=[[SOLSTICE_BOT_TOKEN]]
+SOLSTICE_CHAT_CHANNEL_ID=<linked channel ID>
+SOLSTICE_DISCORD_WEBHOOK_URL=[[SOLSTICE_DISCORD_WEBHOOK_URL]]
 ```
 
-For a Docker deployment, build with the repository root as the context and inject the three variables at runtime. For example, from the repository root:
+4. Deploy the stack using `compose.yaml` and the existing `main-router` network. The bot logs whether Discord confirmed the webhook belongs to the configured channel.
+5. Send an item link from WoW guild chat. A successful webhook post logs the number of links posted. The webhook output is for Discord readers.
 
-```sh
-docker build -t solstice-chat-bot .
-docker run -d --name solstice-chat-bot --restart unless-stopped \
-  --env-file /path/to/solstice-bot.env solstice-chat-bot
-```
-
-The bot resolves name-only messages through Wowhead Forever search. The two example links are verified and built in. If the relay sends only chat, its messages can support a recent WoW activity view. Confirmed online presence would require login/logout or roster data.
-
-## Komodo
-
-Create a Git-backed stack for `logicsec/SolsticeBot` using branch `main` and `compose.yaml`. Deploy with image rebuilds enabled. The service needs no published ports. It waits for configuration if the token or channel ID is absent. Put the bot token in a Komodo secret and reference it from the stack environment. Add the channel ID, redeploy, and use discovery mode to identify the relay before enabling replies.
+The bot uses native link IDs when available and tries exact Wowhead Forever matches for names. Unresolved names get a Wowhead search link.

@@ -6,7 +6,7 @@ services:
     environment:
       SOLSTICE_BOT_TOKEN: ${SOLSTICE_BOT_TOKEN:-}
       SOLSTICE_CHAT_CHANNEL_ID: ${SOLSTICE_CHAT_CHANNEL_ID:-}
-      SOLSTICE_RELAY_ID: ${SOLSTICE_RELAY_ID:-}
+      SOLSTICE_DISCORD_WEBHOOK_URL: ${SOLSTICE_DISCORD_WEBHOOK_URL:-}
     networks:
       - main-router
 
