@@ -1,5 +1,5 @@
 import { Client, Events, GatewayIntentBits, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
-import { parseWowLinks, resolveWowLink } from './wowhead.js';
+import { parseWowLinks, resolveWowLink, wowheadDetails } from './wowhead.js';
 
 const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_DISCORD_WEBHOOK_URL } = process.env;
 if (!SOLSTICE_BOT_TOKEN || !SOLSTICE_CHAT_CHANNEL_ID) {
@@ -107,16 +107,19 @@ async function processQueue() {
       try {
         const resolved = await Promise.all(links.map(resolveWowLink));
         if (!resolved.length) continue;
-        const embeds = resolved.map(({ name, url, search }) => {
+        const embeds = await Promise.all(resolved.map(async ({ name, url, search }) => {
           const type = /\/(item|spell|talent|achievement|quest)=/.exec(new URL(url).pathname)?.[1];
           const category = search ? 'Search result' : type ? type[0].toUpperCase() + type.slice(1) : 'Game link';
+          const details = search ? null : await wowheadDetails(url);
           return {
-            title: escapeMarkdown(name),
+            title: escapeMarkdown(details?.name || name),
             url,
-            color: 0xd7ac63,
+            color: details?.color ?? 0xd7ac63,
+            ...(details?.icon && { thumbnail: { url: details.icon } }),
+            ...(details?.description && { description: escapeMarkdown(details.description) }),
             footer: { text: 'Wowhead Forever · ' + category },
           };
-        });
+        }));
         const url = new URL(await verifyWebhook());
         url.searchParams.set('wait', 'true');
         const posted = await requestWebhook(url, {
