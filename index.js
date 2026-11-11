@@ -68,12 +68,17 @@ async function processQueue() {
         const content = resolved.map(({ name, url, search }) =>
           '[' + escapeMarkdown(name) + (search ? ' (Wowhead search)' : '') + '](' + url + ')'
         ).join(' · ');
-        await message.reply({
+        const options = {
           content,
           flags: MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], repliedUser: false },
-          failIfNotExists: false,
-        });
+        };
+        try {
+          await message.reply({ ...options, failIfNotExists: false });
+        } catch (error) {
+          if (Number(error.code) !== 20062) throw error;
+          await message.channel.send({ ...options, content: content + ' · [Original message](' + message.url + ')' });
+        }
         console.log('Posted Wowhead links:', resolved.length);
       } catch (error) {
         console.error('Could not post item links:', error.code ?? error.name);
