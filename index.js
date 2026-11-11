@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, MessageFlags, escapeMarkdown } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
 import { parseWowLinks, resolveWowLink } from './wowhead.js';
 
 const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_RELAY_ID } = process.env;
@@ -25,7 +25,33 @@ const client = new Client({
 const queue = [];
 let processing = false;
 
-client.once(Events.ClientReady, ready => console.log('Solstice bot connected as ' + ready.user.username));
+function relayCandidate(message) {
+  if (message.author.id === client.user?.id || !parseWowLinks(message.content).length) return;
+  const source = message.webhookId ? 'webhook' : message.author.bot ? 'bot' : 'member';
+  console.log('Relay candidate ID:', message.webhookId ?? message.author.id, '(' + source + ')');
+}
+
+client.once(Events.ClientReady, async ready => {
+  console.log('Solstice bot connected as ' + ready.user.username);
+  try {
+    const channel = await ready.channels.fetch(SOLSTICE_CHAT_CHANNEL_ID);
+    if (!channel?.isTextBased() || !channel.guild) {
+      console.error('Configured Discord channel is unavailable or is not a guild text channel.');
+      return;
+    }
+    const permissions = channel.permissionsFor(ready.user);
+    const view = Boolean(permissions?.has(PermissionFlagsBits.ViewChannel));
+    const history = Boolean(permissions?.has(PermissionFlagsBits.ReadMessageHistory));
+    const send = Boolean(permissions?.has(channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages));
+    console.log('Discord channel access:', JSON.stringify({ view, history, send }));
+    if (!SOLSTICE_RELAY_ID && view && history) {
+      const recent = await channel.messages.fetch({ limit: 15 });
+      for (const message of recent.values()) relayCandidate(message);
+    }
+  } catch (error) {
+    console.error('Discord channel check failed:', error.code ?? error.name);
+  }
+});
 client.on(Events.Error, error => console.error('Discord connection error:', error.code ?? error.name));
 client.on(Events.MessageCreate, message => {
   if (message.channelId !== SOLSTICE_CHAT_CHANNEL_ID || message.author.id === client.user?.id) return;
@@ -33,9 +59,7 @@ client.on(Events.MessageCreate, message => {
   if (SOLSTICE_RELAY_ID && relayId !== SOLSTICE_RELAY_ID) return;
   const links = parseWowLinks(message.content);
   if (!SOLSTICE_RELAY_ID) {
-    if (links.length && (message.webhookId || message.author.bot)) {
-      console.log('Relay candidate ID:', relayId);
-    }
+    relayCandidate(message);
     return;
   }
   if (!links.length || queue.length >= 30) return;
