@@ -7,3 +7,9 @@ services:
       SOLSTICE_BOT_TOKEN: ${SOLSTICE_BOT_TOKEN:-}
       SOLSTICE_CHAT_CHANNEL_ID: ${SOLSTICE_CHAT_CHANNEL_ID:-}
       SOLSTICE_RELAY_ID: ${SOLSTICE_RELAY_ID:-}
+    networks:
+      - main-router
+
+networks:
+  main-router:
+    external: true
