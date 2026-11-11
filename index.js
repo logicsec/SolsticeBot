@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
+import { Client, Events, GatewayIntentBits, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
 import { parseWowLinks, resolveWowLink } from './wowhead.js';
 
 const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_DISCORD_WEBHOOK_URL } = process.env;
@@ -107,17 +107,23 @@ async function processQueue() {
       try {
         const resolved = await Promise.all(links.map(resolveWowLink));
         if (!resolved.length) continue;
-        const content = resolved.map(({ name, url, search }) =>
-          '[' + escapeMarkdown(name) + (search ? ' (Wowhead search)' : '') + '](' + url + ')'
-        ).join(' · ');
+        const embeds = resolved.map(({ name, url, search }) => {
+          const type = /\/(item|spell|talent|achievement|quest)=/.exec(new URL(url).pathname)?.[1];
+          const category = search ? 'Search result' : type ? type[0].toUpperCase() + type.slice(1) : 'Game link';
+          return {
+            title: escapeMarkdown(name),
+            url,
+            color: 0xd7ac63,
+            footer: { text: 'Wowhead Forever · ' + category },
+          };
+        });
         const url = new URL(await verifyWebhook());
         url.searchParams.set('wait', 'true');
         const posted = await requestWebhook(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            content,
-            flags: MessageFlags.SuppressEmbeds,
+            embeds,
             allowed_mentions: { parse: [] },
           }),
         });
