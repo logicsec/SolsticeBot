@@ -1,0 +1,9 @@
+{
+  "name": "solstice-guild-chat-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node index.js", "test": "node --test" },
+  "engines": { "node": ">=22.13" },
+  "dependencies": { "discord.js": "14.28.1" }
+}

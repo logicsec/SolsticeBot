@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      SOLSTICE_BOT_TOKEN: ${SOLSTICE_BOT_TOKEN:-}
+      SOLSTICE_CHAT_CHANNEL_ID: ${SOLSTICE_CHAT_CHANNEL_ID:-}
+      SOLSTICE_RELAY_ID: ${SOLSTICE_RELAY_ID:-}
