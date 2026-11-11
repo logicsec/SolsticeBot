@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, Routes, PermissionFlagsBits, escapeMarkdown } from 'discord.js';
 import { parseWowLinks, resolveWowLink } from './wowhead.js';
 
 const { SOLSTICE_BOT_TOKEN, SOLSTICE_CHAT_CHANNEL_ID, SOLSTICE_RELAY_ID } = process.env;
@@ -38,7 +38,17 @@ client.once(Events.ClientReady, async ready => {
     const history = Boolean(permissions?.has(PermissionFlagsBits.ReadMessageHistory));
     const send = Boolean(permissions?.has(channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages));
     console.log('Discord channel access:', JSON.stringify({ view, history, send }));
-    console.log('Wowhead replies enabled for ' + (SOLSTICE_RELAY_ID ? 'the configured relay' : 'recognized links in the configured channel') + '.');
+    if (view && history) {
+      const messages = await ready.rest.get(Routes.channelMessages(channel.id), { query: new URLSearchParams({ limit: '20' }) });
+      for (const message of messages) {
+        const badgeExample = message.content === "I still don't see it in the channel";
+        const metadata = Object.fromEntries(Object.entries(message).filter(([key, value]) =>
+          /lobby|game|application_id|source|additional_name|flags|^type$/.test(key) &&
+          (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string')
+        ));
+        console.log('Discord message origin:', JSON.stringify({ badgeExample, metadata, keys: Object.keys(message).sort() }));
+      }
+    }
   } catch (error) {
     console.error('Discord channel check failed:', error.code ?? error.name);
   }
@@ -46,6 +56,8 @@ client.once(Events.ClientReady, async ready => {
 client.on(Events.Error, error => console.error('Discord connection error:', error.code ?? error.name));
 client.on(Events.MessageCreate, message => {
   if (message.channelId !== SOLSTICE_CHAT_CHANNEL_ID || message.author.id === client.user?.id) return;
+  // Reply only after the native WoW origin marker has been verified.
+  if (!SOLSTICE_RELAY_ID) return;
   const relayId = message.webhookId ?? message.author.id;
   if (SOLSTICE_RELAY_ID && relayId !== SOLSTICE_RELAY_ID) return;
   const links = parseWowLinks(message.content);
